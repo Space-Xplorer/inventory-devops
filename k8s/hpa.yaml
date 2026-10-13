@@ -1,0 +1,22 @@
+# STRETCH ONLY: needs `minikube addons enable metrics-server` and real CPU load to fire.
+# Not part of the verified demo. Note: with SQLite on a per-pod emptyDir, scaling above
+# 1 replica gives each pod its own separate data.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inventory-api
+  namespace: inventory
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inventory-api
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

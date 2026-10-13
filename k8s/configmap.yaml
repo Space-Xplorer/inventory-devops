@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inventory-config
+  namespace: inventory
+data:
+  DATABASE_URL: "sqlite:////data/inventory.db"
+  LOG_LEVEL: "info"
