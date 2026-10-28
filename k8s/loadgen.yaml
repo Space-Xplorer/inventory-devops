@@ -1,0 +1,98 @@
+# In-cluster load generator for the HPA demo.
+# Replaces the laptop traffic script: 4 independent client pods hit the app
+# Service via cluster DNS, producing realistic distributed load.
+#
+# Scale up:   kubectl -n inventory scale deployment/loadgen --replicas=4
+# Scale down: kubectl -n inventory scale deployment/loadgen --replicas=0
+# Tune load:  edit SLEEP_MS (milliseconds between requests, default 50)
+#
+# The HPA targets only inventory-api. Do NOT attach an HPA to this deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: inventory
+  labels:
+    app: loadgen
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      # Prevent loadgen pods from landing on the same node as app pods when
+      # the cluster has multiple nodes. Soft preference only — fine for minikube.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: inventory-api
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.7.1
+          imagePullPolicy: IfNotPresent
+          env:
+            # Milliseconds to sleep between requests. Lower = more CPU on the app.
+            - name: SLEEP_MS
+              value: "50"
+            # Primary endpoint. POST /items is the most CPU-intensive (ORM write).
+            - name: ENDPOINT
+              value: "/items"
+            # Cluster-internal URL of the app Service.
+            - name: BASE_URL
+              value: "http://inventory-api.inventory.svc.cluster.local:8000"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "loadgen started: BASE_URL=$BASE_URL ENDPOINT=$ENDPOINT SLEEP_MS=$SLEEP_MS"
+              # Seed randomness from pod hostname so each replica behaves differently.
+              SEED=$(cat /etc/hostname | cksum | awk '{print $1}')
+              i=$SEED
+              while true; do
+                i=$((i + 1))
+
+                # Rotate across three request types so traffic looks varied.
+                # i mod 10: 0-4 -> POST /items, 5-7 -> GET /items, 8-9 -> GET /items/{id}
+                mod=$((i % 10))
+
+                if [ "$mod" -le 4 ]; then
+                  # POST a new item — hits SQLAlchemy ORM write, most CPU-intensive.
+                  name="item-$((i % 500))"
+                  qty=$((i % 50))
+                  curl -sf -X POST "$BASE_URL$ENDPOINT" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"$name\",\"quantity\":$qty,\"price\":9.99}" \
+                    -o /dev/null || true
+
+                elif [ "$mod" -le 7 ]; then
+                  # GET all items — full table scan.
+                  curl -sf "$BASE_URL/items" -o /dev/null || true
+
+                else
+                  # GET a specific item — exercises the 404 path for realism.
+                  curl -sf "$BASE_URL/items/$((i % 20 + 1))" -o /dev/null || true
+                fi
+
+                # Add per-pod jitter: sleep SLEEP_MS ± 20% so pods don't fire in lockstep.
+                # cksum of hostname gives a stable per-pod offset (0-19 ms).
+                jitter=$((SEED % 20))
+                sleep_sec=$(awk "BEGIN{printf \"%.3f\", ($SLEEP_MS + $jitter) / 1000}")
+                sleep "$sleep_sec"
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
