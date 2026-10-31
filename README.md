@@ -238,10 +238,12 @@ Use the correct existing remote and push the updated commit yourself, or pass a 
 `./PUSH_TO_GITHUB.sh inventory-devops-b13`. Check the local Git author email matches your GitHub email.
 
 On push/PR to `main`, Actions runs pytest, pip-audit, Docker build and Trivy. Pushes publish to
-`ghcr.io/<owner>/<repo>` with SHA and latest tags using `GITHUB_TOKEN`. Security scans remain report-only
-while establishing a baseline. The supplied minikube Deployment deliberately uses the locally loaded
-image, not the registry image. For a registry image, update `image:` and configure registry access;
-a public package can be pulled without private-package credentials.
+`ghcr.io/<owner>/<repo>` with SHA and latest tags using `GITHUB_TOKEN`. Both security scans are
+**blocking gates**: pip-audit fails the job if any dependency has a known vulnerability; Trivy fails
+the job on CRITICAL or HIGH image vulnerabilities (`exit-code: "1"`, `ignore-unfixed: true` so
+upstream issues with no patch do not block). The supplied minikube Deployment deliberately uses the
+locally loaded image, not the registry image. For a registry image, update `image:` and configure
+registry access; a public package can be pulled without private-package credentials.
 
 ## Viva prep
 
